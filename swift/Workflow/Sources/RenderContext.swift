@@ -47,10 +47,14 @@ import ReactiveSwift
 /// `Rendering` value, which is then returned to the caller.
 public class RenderContext<WorkflowType: Workflow>: RenderContextType {
 
+    public var storage: WorkflowType.Storage
+    
     private (set) var isValid = true
     
     // Ensure that this class can never be initialized externally
-    private init() {}
+    private init(storage: WorkflowType.Storage) {
+        self.storage = storage
+    }
 
     /// Creates or updates a child workflow of the given type, performs a render
     /// pass, and returns the result.
@@ -96,7 +100,7 @@ public class RenderContext<WorkflowType: Workflow>: RenderContextType {
 
         init(_ implementation: T) {
             self.implementation = implementation
-            super.init()
+            super.init(storage: implementation.storage)
         }
 
         override func render<Child, Action>(workflow: Child, key: String, outputMap: @escaping (Child.Output) -> Action) -> Child.Rendering where WorkflowType == Action.WorkflowType, Child : Workflow, Action : WorkflowAction {
@@ -131,6 +135,8 @@ public class RenderContext<WorkflowType: Workflow>: RenderContextType {
 internal protocol RenderContextType: class {
     associatedtype WorkflowType: Workflow
 
+    var storage: WorkflowType.Storage { get set }
+    
     func render<Child, Action>(workflow: Child, key: String, outputMap: @escaping (Child.Output) -> Action) -> Child.Rendering where Child: Workflow, Action: WorkflowAction, Action.WorkflowType == WorkflowType
 
     func makeSink<Action>(of actionType: Action.Type) -> Sink<Action> where Action: WorkflowAction, Action.WorkflowType == WorkflowType

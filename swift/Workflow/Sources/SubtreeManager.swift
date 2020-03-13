@@ -32,6 +32,8 @@ extension WorkflowNode {
 
         /// The current array of children
         private (set) internal var childWorkflows: [ChildKey:AnyChildWorkflow] = [:]
+        
+        private var storage: WorkflowType.Storage
 
         /// The current array of workers
         private (set) internal var childWorkers: [AnyChildWorker] = []
@@ -39,7 +41,9 @@ extension WorkflowNode {
         /// Subscriptions from the outside world.
         private var subscriptions: Subscriptions = Subscriptions(eventSources: [], eventPipe: EventPipe())
 
-        init() {}
+        init(storage: WorkflowType.Storage) {
+            self.storage = storage
+        }
 
         /// Performs an update pass using the given closure.
         func render<Rendering>(_ actions: (RenderContext<WorkflowType>) -> Rendering) -> Rendering {
@@ -53,13 +57,15 @@ extension WorkflowNode {
             let context = Context(
                 previousSinks: previousSinks,
                 originalChildWorkflows: childWorkflows,
-                originalChildWorkers: childWorkers)
+                originalChildWorkers: childWorkers,
+                storage: storage)
 
             let wrapped = RenderContext.make(implementation: context)
 
             /// Pass the context into the closure to allow a render to take place
             let rendering = actions(wrapped)
             
+            self.storage = wrapped.storage
             wrapped.invalidate()
 
             /// After the render is complete, assign children using *only the children that were used during the render
@@ -147,6 +153,8 @@ extension WorkflowNode.SubtreeManager {
 
     /// The workflow context implementation used by the subtree manager.
     fileprivate final class Context: RenderContextType {
+        var storage: WorkflowType.Storage
+        
 
         private (set) internal var eventPipes: [EventPipe]
 
@@ -160,7 +168,7 @@ extension WorkflowNode.SubtreeManager {
 
         private (set) internal var eventSources: [Signal<AnyWorkflowAction<WorkflowType>, Never>] = []
 
-        internal init(previousSinks: [ObjectIdentifier:AnyReusableSink], originalChildWorkflows: [ChildKey:AnyChildWorkflow], originalChildWorkers: [AnyChildWorker]) {
+        internal init(previousSinks: [ObjectIdentifier:AnyReusableSink], originalChildWorkflows: [ChildKey:AnyChildWorkflow], originalChildWorkers: [AnyChildWorker], storage: WorkflowType.Storage) {
             self.eventPipes = []
 
             self.sinkStore = SinkStore(previousSinks: previousSinks)
@@ -170,6 +178,8 @@ extension WorkflowNode.SubtreeManager {
 
             self.originalChildWorkers = originalChildWorkers
             self.usedChildWorkers = []
+            
+            self.storage = storage
         }
 
         func render<Child, Action>(workflow: Child, key: String, outputMap: @escaping (Child.Output) -> Action) -> Child.Rendering where Child : Workflow, Action : WorkflowAction, WorkflowType == Action.WorkflowType {

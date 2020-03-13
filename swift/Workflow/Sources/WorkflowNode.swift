@@ -27,20 +27,21 @@ final class WorkflowNode<WorkflowType: Workflow> {
     var onOutput: ((Output) -> Void)? = nil
 
     /// Manages the children of this workflow, including diffs during/after render passes.
-    private let subtreeManager = SubtreeManager()
+    private let subtreeManager: SubtreeManager
     
     init(workflow: WorkflowType) {
         
         /// Get the initial state
         self.workflow = workflow
         self.state = workflow.makeInitialState()
+        self.subtreeManager = SubtreeManager(storage: workflow.makeInitialStorage())
 
         subtreeManager.onUpdate = { [weak self] output in
             self?.handle(subtreeOutput: output)
         }
 
     }
-
+    
     /// Handles an event produced by the subtree manager
     private func handle(subtreeOutput: SubtreeManager.Output) {
 

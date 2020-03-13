@@ -61,11 +61,16 @@ public protocol Workflow: AnyWorkflowConvertible {
     /// `Rendering` is the type that is produced by the `render` method: it
     /// is commonly a view / screen model.
     associatedtype Rendering
-
+    
+    /// `Storage` is used to persist data that will be used from within the `render` call.
+    associatedtype Storage = Void
+    
     /// This method is invoked once when a workflow node comes into existence.
     ///
     /// - Returns: The initial state for the workflow.
     func makeInitialState() -> State
+    
+    func makeInitialStorage() -> Storage
 
     /// Called when a new workflow is passed down from the parent to an existing workflow node.
     ///
@@ -91,4 +96,8 @@ extension Workflow {
         return AnyWorkflow(self)
     }
 
+}
+
+public extension Workflow where Storage == Void {
+    func makeInitialStorage() -> Storage { }
 }
