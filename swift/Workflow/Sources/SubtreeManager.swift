@@ -35,12 +35,6 @@ extension WorkflowNode {
         
         private var storage: WorkflowType.Storage
 
-        /// The current array of workers
-        private (set) internal var childWorkers: [AnyChildWorker] = []
-
-        /// Subscriptions from the outside world.
-        private var subscriptions: Subscriptions = Subscriptions(eventSources: [], eventPipe: EventPipe())
-
         init(storage: WorkflowType.Storage) {
             self.storage = storage
         }
@@ -57,7 +51,6 @@ extension WorkflowNode {
             let context = Context(
                 previousSinks: previousSinks,
                 originalChildWorkflows: childWorkflows,
-                originalChildWorkers: childWorkers,
                 storage: storage)
 
             let wrapped = RenderContext.make(implementation: context)
@@ -72,9 +65,6 @@ extension WorkflowNode {
             /// pass.* This means that any pre-existing children that were *not* used during the render pass are removed
             /// as a result of this call to `render`.
             self.childWorkflows = context.usedChildWorkflows
-            self.childWorkers = context.usedChildWorkers
-            /// Merge all of the signals together from the subscriptions.
-            self.subscriptions = Subscriptions(eventSources: context.eventSources, eventPipe: EventPipe())
 
             /// Captured the reusable sinks from this render pass.
             self.previousSinks = context.sinkStore.usedSinks
@@ -82,7 +72,6 @@ extension WorkflowNode {
             /// Capture all the pipes to be enabled after render completes.
             self.eventPipes = context.eventPipes
             self.eventPipes.append(contentsOf: context.sinkStore.eventPipes)
-            self.eventPipes.append(self.subscriptions.eventPipe)
 
             /// Set all event pipes to `pending`.
             self.eventPipes.forEach { $0.setPending() }
@@ -163,21 +152,15 @@ extension WorkflowNode.SubtreeManager {
         private let originalChildWorkflows: [ChildKey:AnyChildWorkflow]
         private (set) internal var usedChildWorkflows: [ChildKey:AnyChildWorkflow]
 
-        private let originalChildWorkers: [AnyChildWorker]
-        private (set) internal var usedChildWorkers: [AnyChildWorker]
-
         private (set) internal var eventSources: [Signal<AnyWorkflowAction<WorkflowType>, Never>] = []
 
-        internal init(previousSinks: [ObjectIdentifier:AnyReusableSink], originalChildWorkflows: [ChildKey:AnyChildWorkflow], originalChildWorkers: [AnyChildWorker], storage: WorkflowType.Storage) {
+        internal init(previousSinks: [ObjectIdentifier:AnyReusableSink], originalChildWorkflows: [ChildKey:AnyChildWorkflow], storage: WorkflowType.Storage) {
             self.eventPipes = []
 
             self.sinkStore = SinkStore(previousSinks: previousSinks)
 
             self.originalChildWorkflows = originalChildWorkflows
             self.usedChildWorkflows = [:]
-
-            self.originalChildWorkers = originalChildWorkers
-            self.usedChildWorkers = []
             
             self.storage = storage
         }
@@ -236,27 +219,6 @@ extension WorkflowNode.SubtreeManager {
             }
 
             return sink
-        }
-
-        func subscribe<Action>(signal: Signal<Action, Never>) where Action : WorkflowAction, WorkflowType == Action.WorkflowType {
-            eventSources.append(signal.map { AnyWorkflowAction($0) })
-        }
-
-        func awaitResult<W, Action>(for worker: W, outputMap: @escaping (W.Output) -> Action) where W : Worker, Action : WorkflowAction, WorkflowType == Action.WorkflowType {
-
-            let outputMap = { AnyWorkflowAction(outputMap($0)) }
-            let eventPipe = EventPipe()
-            self.eventPipes.append(eventPipe)
-
-            if let existingWorker = originalChildWorkers
-                .compactMap({ $0 as? ChildWorker<W> })
-                .first(where: { $0.worker.isEquivalent(to: worker) }) {
-                existingWorker.update(outputMap: outputMap, eventPipe: eventPipe)
-                usedChildWorkers.append(existingWorker)
-            } else {
-                let newChildWorker = ChildWorker(worker: worker, outputMap: outputMap, eventPipe: eventPipe)
-                usedChildWorkers.append(newChildWorker)
-            }
         }
         
     }
@@ -425,85 +387,6 @@ extension WorkflowNode.SubtreeManager {
     }
 
 }
-
-// MARK: - Workers
-
-extension WorkflowNode.SubtreeManager {
-
-    /// Abstract base class for running children in the subtree.
-    internal class AnyChildWorker {
-        fileprivate var eventPipe: EventPipe
-
-        fileprivate init(eventPipe: EventPipe) {
-            self.eventPipe = eventPipe
-        }
-    }
-
-    fileprivate final class ChildWorker<W: Worker>: AnyChildWorker {
-
-        let worker: W
-
-        let signalProducer: SignalProducer<W.Output, Never>
-
-        private var outputMap: (W.Output) -> AnyWorkflowAction<WorkflowType>
-
-        private let (lifetime, token) = Lifetime.make()
-
-        init(worker: W, outputMap: @escaping (W.Output) -> AnyWorkflowAction<WorkflowType>, eventPipe: EventPipe) {
-            self.worker = worker
-            self.signalProducer = worker.run()
-            self.outputMap = outputMap
-            super.init(eventPipe: eventPipe)
-
-            signalProducer
-                .take(during: lifetime)
-                .observe(on: QueueScheduler.workflowExecution)
-                .startWithValues { [weak self] output in
-                    self?.handle(output: output)
-                }
-        }
-
-        func update(outputMap: @escaping (W.Output) -> AnyWorkflowAction<WorkflowType>, eventPipe: EventPipe) {
-            self.outputMap = outputMap
-            self.eventPipe = eventPipe
-        }
-
-        private func handle(output: W.Output) {
-            let output = Output.update(
-                outputMap(output),
-                source: .worker)
-            eventPipe.handle(event: output)
-        }
-
-    }
-
-}
-
-
-// MARK: - Subscriptions
-
-extension WorkflowNode.SubtreeManager {
-    fileprivate final class Subscriptions {
-        private var (lifetime, token) = Lifetime.make()
-        private (set) internal var eventPipe: EventPipe
-
-        init(eventSources: [Signal<AnyWorkflowAction<WorkflowType>, Never>], eventPipe: EventPipe) {
-            self.eventPipe = eventPipe
-
-            Signal
-                .merge(eventSources)
-                .map({ action -> Output in
-                    return Output.update(action, source: .external)
-                })
-                .observe(on: QueueScheduler.workflowExecution)
-                .take(during: lifetime)
-                .observeValues({ output in
-                    eventPipe.handle(event: output)
-                })
-        }
-    }
-}
-
 
 // MARK: - Child Workflows
 

@@ -16,7 +16,7 @@
 import Workflow
 import WorkflowUI
 import ReactiveSwift
-
+import WorkflowReactiveSwiftWorker
 
 // MARK: Input and Output
 
@@ -168,7 +168,8 @@ extension DemoWorkflow {
             refreshText = "Loading..."
             refreshEnabled = false
 
-            context.awaitResult(for: RefreshWorker()) { output -> Action in
+            RefreshWorker()
+            .mapOutput { output -> Action in
                 switch output {
                 case .success(let result):
                     return .refreshComplete(result)
@@ -176,6 +177,7 @@ extension DemoWorkflow {
                     return .refreshError(error)
                 }
             }
+            .running(with: context)
         }
 
         let subscribeTitle: String

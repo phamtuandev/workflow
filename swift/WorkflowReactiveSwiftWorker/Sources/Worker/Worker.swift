@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import ReactiveSwift
+import Workflow
 
 /// Workers define a unit of asynchronous work.
 ///
@@ -23,7 +24,7 @@ import ReactiveSwift
 /// If there is, and if the workers are 'equivalent', the context leaves the existing worker running.
 ///
 /// If there is not an existing worker of this type, the context will kick off the new worker (via `run`).
-public protocol Worker {
+public protocol Worker: AnyWorkflowConvertible {
 
     /// The type of output events returned by this worker.
     associatedtype Output
@@ -41,6 +42,71 @@ extension Worker where Self: Equatable {
 
     public func isEquivalent(to otherWorker: Self) -> Bool {
         return self == otherWorker
+    }
+
+}
+
+extension Worker {
+
+    public func asAnyWorkflow() -> AnyWorkflow<Void, Output> {
+        return WorkerWorkflow(worker: self).asAnyWorkflow()
+    }
+
+}
+
+
+import Foundation
+
+
+fileprivate struct WorkerWorkflow<WorkerType: Worker>: Workflow {
+
+    var worker: WorkerType
+
+    typealias Output = WorkerType.Output
+    
+    typealias State = UUID
+    
+    struct Storage {
+        var state: State?
+        var token: Lifetime.Token?
+    }
+
+    func makeInitialState() -> State {
+        return UUID()
+    }
+    
+    func makeInitialStorage() -> Storage {
+        .init(state: nil, token: nil)
+    }
+
+    func workflowDidChange(from previousWorkflow: WorkerWorkflow<WorkerType>,
+                           state: inout UUID) {
+        if !worker.isEquivalent(to: previousWorkflow.worker) {
+            state = UUID()
+        }
+    }
+
+    typealias Rendering = Void
+
+    func render(state: State, context: RenderContext<WorkerWorkflow>) -> Rendering {
+        let sink = context.makeSink(of: AnyWorkflowAction.self)
+
+        guard state != context.storage.state else {
+            return
+        }
+        
+        let (lifetime, token) = Lifetime.make()
+        context.storage.state = state
+        context.storage.token = token
+        worker
+            .run()
+            .take(during: lifetime)
+            .on(disposed: {
+                print("Disposing")
+            })
+            .map { AnyWorkflowAction(sendingOutput: $0) }
+            .observe(on: QueueScheduler.main)
+            .startWithValues(sink.send)
     }
 
 }
