@@ -1,0 +1,5 @@
+$dokka.format:gfm
+$dokka.linkExtension:md
+$dokka.location:com.squareup.workflow.ui.backstack$toBackStackScreen(kotlin.collections.List((com.squareup.workflow.ui.backstack.toBackStackScreen.T)))com.squareup.workflow.ui.backstack/kotlin.collections.-list/to-back-stack-screen.md
+$dokka.location:com.squareup.workflow.ui.backstack$toBackStackScreenOrNull(kotlin.collections.List((com.squareup.workflow.ui.backstack.toBackStackScreenOrNull.T)))com.squareup.workflow.ui.backstack/kotlin.collections.-list/to-back-stack-screen-or-null.md
+com.squareup.workflow.ui.backstack
